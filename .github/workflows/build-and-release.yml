@@ -2,6 +2,8 @@ name: Build and Release LexLedger
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
@@ -68,7 +70,7 @@ jobs:
     name: Create GitHub Release
     needs: [build-mac, build-win]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, "refs/tags/v") || github.event_name == "workflow_dispatch"
+    if: startsWith(github.ref, "refs/tags/v") || github.ref == "refs/heads/main" || github.event_name == "workflow_dispatch"
     steps:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
@@ -76,8 +78,8 @@ jobs:
       - name: Create GitHub Release with Installers
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || "v1.0.0" }}
-          name: LexLedger ${{ github.ref_name || "v1.0.0" }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v1.0.0' }}
+          name: LexLedger ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v1.0.0' }}
           draft: false
           prerelease: false
           generate_release_notes: true
