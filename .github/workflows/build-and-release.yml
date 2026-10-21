@@ -1,12 +1,15 @@
-name: Build and Release LexLedger
+name: Release LexLedger
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v1.0.1)'
+        required: false
+        default: 'v1.0.1'
 
 permissions:
   contents: write
@@ -67,7 +70,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Create GitHub Release
+    name: Publish GitHub Release
     needs: [build-mac, build-win]
     runs-on: ubuntu-latest
     steps:
@@ -82,6 +85,8 @@ jobs:
         run: |
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             TAG="${{ github.ref_name }}"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            TAG="${{ inputs.version }}"
           else
             TAG="v1.0.0"
           fi
