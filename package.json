@@ -1,0 +1,84 @@
+{
+  "name": "lexledger",
+  "version": "1.0.0",
+  "description": "Alan&Alan Hukuk Bürosu Yönetim Sistemi",
+  "main": "out/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "build:mac": "electron-vite build && electron-builder --mac",
+    "build:win": "electron-vite build && electron-builder --win",
+    "package": "electron-vite build && electron-builder",
+    "postinstall": "electron-rebuild -f -w better-sqlite3"
+  },
+  "build": {
+    "appId": "com.alanalan.lexledger",
+    "productName": "LexLedger",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "resources/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal", "arm64", "x64"]
+        }
+      ],
+      "icon": "resources/icon.icns",
+      "category": "public.app-category.business"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "resources/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "LexLedger"
+    }
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.0",
+    "@electron-toolkit/tsconfig": "^2.0.0",
+    "@electron-toolkit/utils": "^3.0.0",
+    "@electron/rebuild": "^4.2.1",
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20.11.5",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.17",
+    "electron": "^44.9.0",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.0.0",
+    "postcss": "^8.4.33",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.11"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.0",
+    "date-fns": "^3.3.1",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.2",
+    "lucide-react": "^0.321.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.22.0",
+    "recharts": "^2.12.0"
+  }
+}
