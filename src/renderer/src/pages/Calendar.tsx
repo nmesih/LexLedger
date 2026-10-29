@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import Header from '../components/layout/Header'
 import Modal from '../components/ui/Modal'
+import { MinuteRadarModal } from '../components/calendar/MinuteRadarModal'
 import { CalendarEvent, CalendarEventType, CalendarImportResult, Client, Case } from '../types'
 
 // Safe local date formatting helper (prevents timezone offset bugs)
@@ -111,6 +112,9 @@ export const Calendar: React.FC = () => {
   const [importLoading, setImportLoading] = useState<boolean>(false)
   const [isDraggingFile, setIsDraggingFile] = useState<boolean>(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Minute Radar Modal state
+  const [isRadarModalOpen, setIsRadarModalOpen] = useState<boolean>(false)
 
   // Event Modal state
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false)
@@ -210,6 +214,30 @@ export const Calendar: React.FC = () => {
       setLoading(false)
     }
   }, [])
+
+  // Handle adding events extracted from Minute Radar
+  const handleAddRadarEvents = async (
+    newEvents: Array<{
+      title: string
+      event_type: 'DURUSMA' | 'SURELI_IS'
+      start_date: string
+      start_time: string
+      court: string
+      file_no: string
+      description: string
+      client_id: number | null
+      case_id: number | null
+      status: 'BEKLIYOR'
+      is_ics_import: 0
+    }>
+  ): Promise<void> => {
+    for (const ev of newEvents) {
+      await window.api.calendar.create(ev)
+    }
+    setToastMessage(`✓ ${newEvents.length} adet ara karar / duruşma başarıyla takvime eklendi!`)
+    setToastType('success')
+    await loadData()
+  }
 
   useEffect(() => {
     loadData()
@@ -645,6 +673,15 @@ export const Calendar: React.FC = () => {
           >
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
             <span>Mükerrerleri Temizle</span>
+          </button>
+
+          <button
+            onClick={() => setIsRadarModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-navy-950 via-slate-900 to-indigo-950 hover:from-slate-900 hover:to-indigo-900 text-white border border-amber-400/40 hover:border-amber-400 rounded-lg text-xs font-semibold transition-all shadow-sm cursor-pointer"
+            title="Duruşma zaptını yapıştırarak kesin süreleri, ara kararları ve sonraki duruşmayı otomatik çıkarın"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[#C9A84C]" />
+            <span>Zabıt &amp; Süre Radarı</span>
           </button>
 
           <button
@@ -1646,6 +1683,15 @@ export const Calendar: React.FC = () => {
           </div>
         </Modal>
       )}
+
+      {/* Minute Radar Modal (Zabıt & Süre Radarı) */}
+      <MinuteRadarModal
+        isOpen={isRadarModalOpen}
+        onClose={() => setIsRadarModalOpen(false)}
+        clients={clients}
+        cases={cases}
+        onAddEvents={handleAddRadarEvents}
+      />
     </div>
   )
 }
