@@ -17,7 +17,7 @@ export interface ExtractedActionItem {
   file_no?: string
   description?: string
   amount?: number
-  is_definite_deadline: boolean // Kesin süre mi?
+  is_definite_deadline: boolean // Kesin süre veya yasal itiraz süresi mi?
   priority: 'high' | 'medium' | 'normal'
   original_clause?: string
 }
@@ -32,6 +32,16 @@ export const pad2 = (n: number): string => String(n).padStart(2, '0')
 
 export const toYmd = (d: Date): string => {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+/**
+ * Türkçe büyük/küçük harf duyarlılığını (İ/i, I/ı vb.) hatasız normalize eder.
+ */
+export const normalizeTr = (str: string): string => {
+  return (str || '')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase()
 }
 
 export const parseTrDateToYmd = (dateStr: string): string | null => {
@@ -79,7 +89,7 @@ export const adjustForAdliTatil = (date: Date): Date => {
 
 // Convert Turkish number words to integers
 const parseTrNumber = (text: string): number | null => {
-  const cleaned = text.trim().toLowerCase()
+  const cleaned = normalizeTr(text.trim())
   if (/^\d+$/.test(cleaned)) return parseInt(cleaned, 10)
   const map: Record<string, number> = {
     bir: 1,
@@ -109,6 +119,7 @@ const parseTrNumber = (text: string): number | null => {
 
 /**
  * Duruşma zaptı metnini tamamen yerel olarak ve bellek içinde (in-memory) analiz eder.
+ * Kesin süreler, itiraz / kanun yolları (CMK/HMK), avans depoları ve bir sonraki celseyi çıkarır.
  */
 export const parseCourtMinute = (
   rawText: string,
@@ -118,19 +129,21 @@ export const parseCourtMinute = (
   const courtInfo: ParsedCourtInfo = {}
 
   // 1. MAHKEME ADI TESPİTİ
-  // Örn: T.C. ANKARA 4. ASLİYE TİCARET MAHKEMESİ veya İSTANBUL 12. İŞ MAHKEMESİ
+  // Büyük harfle başlayan mahkeme adlarını temizce yakala
   const courtMatch = text.match(
-    /(?:T\.?C\.?\s*)?([A-ZÇĞİÖŞÜ0-9\s.]+MAHKEMES[İI](?:'N[İI]Z?|'NE)?(?:\s+BAŞKANLIĞI|\s+HÂKİMLİĞİ)?)/i
+    /(?:T\.?C\.?\s*)?\b([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü0-9\s.]+MAHKEMES[İI](?:'N[İI]Z?|'NE)?(?:\s+BAŞKANLIĞI|\s+HÂKİMLİĞİ)?)/
   )
   if (courtMatch) {
-    courtInfo.court = courtMatch[1]
+    let cleanCourt = courtMatch[1]
       .replace(/(?:'n[iz]|'ne|başkanlığı|hâkimliği)/gi, '')
       .replace(/\s+/g, ' ')
       .trim()
+    // Baştaki "vasıtasıyla", "veya", "ile" gibi bağlaçları temizle
+    cleanCourt = cleanCourt.replace(/^(?:veya|ile|vasıtasıyla|nezdinde|tarafından|mahkemesince)\s+/i, '')
+    courtInfo.court = cleanCourt
   }
 
   // 2. ESAS NO TESPİTİ
-  // Örn: ESAS NO : 2024/152 Esas veya 2023/45 E.
   const fileNoMatch = text.match(
     /(?:ESAS\s*NO\s*[:]\s*|\bESAS\s*:\s*|\b)(\d{4}\s*\/\s*\d+)(?:\s*E\.?|\s*Esas)?/i
   )
@@ -138,22 +151,27 @@ export const parseCourtMinute = (
     courtInfo.file_no = fileNoMatch[1].replace(/\s+/g, '') + ' E.'
   }
 
-  // 3. CELSE / DURUŞMA TARİHİ TESPİTİ
-  // Tutanaktaki ilk veya celse tarihlerinden bugünkü/referans duruşma tarihini bul
-  const celseMatch = text.match(/(?:Celse\s*Tarihi\s*[:]\s*|Tarih\s*[:]\s*)(\d{1,2}[./]\d{1,2}[./]\d{4})/i)
+  // 3. CELSE / DURUŞMA REFERANS TARİHİ TESPİTİ
+  // Yalnızca açıkça belirtilmiş celse tarihini veya karar sonundaki tarihi al
+  // (Gelecekteki sonraki duruşma tarihini başlangıç tarihi sanmaması için filtreliyoruz)
+  const celseMatch = text.match(
+    /(?:Celse\s*Tarihi\s*[:]\s*|Tarih\s*[:]\s*|Duruşma\s*Günü\s*[:]\s*)(\d{1,2}[./]\d{1,2}[./]\d{4})/i
+  )
   if (celseMatch) {
     const ymd = parseTrDateToYmd(celseMatch[1])
     if (ymd) courtInfo.hearing_date = ymd
   } else {
-    // Alternatif olarak tutanak başındaki ilk geçerli tarihi ara
-    const firstDateMatch = text.match(/\b(\d{1,2}[./]\d{1,2}[./]\d{4})\b/)
-    if (firstDateMatch) {
-      const ymd = parseTrDateToYmd(firstDateMatch[1])
+    // Tutanak sonundaki tarih: "karar verildi. 29/10/2026"
+    const endDateMatch = text.match(
+      /(?:karar\s*verildi|imza|kâtip|hâkim)[\s\S]*?(\d{1,2}[./]\d{1,2}[./]\d{4})\s*$/i
+    )
+    if (endDateMatch) {
+      const ymd = parseTrDateToYmd(endDateMatch[1])
       if (ymd) courtInfo.hearing_date = ymd
     }
   }
 
-  // Referans Başlangıç Tarihi: Zaptın celse tarihi varsa o, yoksa bugünün yerel tarihi
+  // Referans Başlangıç Tarihi: Zaptın celse tarihi varsa o, yoksa BUGÜNÜN tarihi
   const baseDate = courtInfo.hearing_date
     ? new Date(courtInfo.hearing_date + 'T00:00:00')
     : new Date()
@@ -168,24 +186,40 @@ export const parseCourtMinute = (
     clausesText = text.slice(geregiIndex)
   }
 
-  // Maddelere ayır: 1-, 1., 1), veya Ara Karar 1
+  // Maddelere ve alt bentlere ayır: 1-, 2., 3), A-, alt bentler (-Adli kontrol...)
   const rawClauses = clausesText
-    .split(/(?:\r?\n|^)\s*(?:\d+[\.\-\)]|[A-ZÇĞİÖŞÜ]\s*[\.\-\)]|Ara\s*Karar\s*\d+[:.\-]?)\s*/i)
+    .split(/(?:\r?\n|^)\s*(?:\d+[\.\-\)]|[A-ZÇĞİÖŞÜ]\s*[\.\-\)]|Ara\s*Karar\s*\d+[:.\-]?|[-•*]\s*(?=[A-ZÇĞİÖŞÜa-zçğıöşü]))/i)
     .map((c) => c.trim())
-    .filter((c) => c.length > 15) // Çok kısa parçaları at
+    .filter((c) => c.length > 10)
 
-  // Maddeleri analiz et
+  // 5. HER MADDEYİ ÇÖZÜMLE
   for (const clause of rawClauses) {
-    const isDefinite = /kesin\s+süre/i.test(clause)
+    const normClause = normalizeTr(clause)
+    const isDefinite = normClause.includes('kesin süre') || normClause.includes('kesin olarak')
+    const isObjection =
+      normClause.includes('itiraz') ||
+      normClause.includes('istinaf') ||
+      normClause.includes('temyiz') ||
+      normClause.includes('kanun yolu')
 
     // A) SONRAKİ DURUŞMA TESPİTİ
-    // Örn: "Bir sonraki duruşmanın 18/02/2027 günü saat 10:45'e bırakılmasına"
-    // Örn: "Duruşmanın 24.11.2026 günü saat 09:30'a talikine"
-    const nextHearingMatch = clause.match(
-      /(?:duruşma(?:nın|ya)?|celse(?:nin)?|bırakılmasına|talikine|ertelenmesine)[\s\S]*?(\d{1,2}[./]\d{1,2}[./]\d{4})(?:\s*günü)?(?:\s*saat\s*(\d{1,2}[:.]\d{2}))?/i
-    ) || clause.match(/(\d{1,2}[./]\d{1,2}[./]\d{4})(?:\s*günü)?\s*saat\s*(\d{1,2}[:.]\d{2})[\s\S]*?(?:duruşma|bırakıl|talik)/i)
+    // "duruşmanın 03/12/2026 günü saat 10:55 bırakılmasına karar verildi"
+    const nextHearingMatch =
+      clause.match(
+        /(?:duruşma(?:nın|ya)?|celse(?:nin)?|bırakılmasına|talikine|ertelenmesine)[\s\S]*?(\d{1,2}[./]\d{1,2}[./]\d{4})(?:\s*günü)?(?:\s*saat\s*(\d{1,2}[:.]\d{2}))?/i
+      ) ||
+      clause.match(
+        /(\d{1,2}[./]\d{1,2}[./]\d{4})(?:\s*günü)?\s*(?:saat\s*)?(\d{1,2}[:.]\d{2})?[\s\S]*?(?:duruşma|bırakıl|talik|ertelen)/i
+      )
 
-    if (nextHearingMatch && /duruşma|celse|talik|bırakıl/i.test(clause)) {
+    if (
+      nextHearingMatch &&
+      (normClause.includes('duruşma') ||
+        normClause.includes('celse') ||
+        normClause.includes('bırakıl') ||
+        normClause.includes('talik') ||
+        normClause.includes('ertelen'))
+    ) {
       const targetDateYmd = parseTrDateToYmd(nextHearingMatch[1])
       let targetTime = '09:30'
       if (nextHearingMatch[2]) {
@@ -207,21 +241,32 @@ export const parseCourtMinute = (
           priority: 'high',
           original_clause: clause
         })
-        continue // Duruşma maddesi olarak eklendi, diğer kontrollere geç
+
+        // Eğer bu fıkrada başka süre/para geçmiyorsa diğer sürelere bakmadan devam et
+        if (
+          !/(?:süre|içinde|içerisinde|zarfında|TL|ücret|avans|itiraz)/i.test(
+            clause.replace(nextHearingMatch[0], '')
+          )
+        ) {
+          continue
+        }
       }
     }
 
-    // B) SÜRELİ İŞLER / KESİN SÜRELER TESPİTİ
-    // Örn: "iki haftalık kesin süre verilmesine", "10 günlük süre verilmesine"
-    const durationMatch = clause.match(
-      /(\d+|bir|iki|üç|dört|beş|altı|yedi|on|on\s*beş|onbeş|yirmi|otuz)\s*(günlük|gün|haftalık|hafta|aylık|ay)\s*(kesin\s*)?süre/i
-    )
+    // B) SÜRELİ İŞLER / KESİN SÜRELER / İTİRAZ & KANUN YOLU SÜRELERİ
+    // Örn 1: "2 haftalık kesin süre verilmesine"
+    // Örn 2: "tebliğden itibaren 2 HAFTA içinde ... İTİRAZ edilebileceğinin bildirilmesine"
+    // Örn 3: "7 gün içerisinde istinaf yoluna başvurulabileceğine"
+    const durationMatch =
+      normClause.match(
+        /(\d+|bir|iki|üç|dört|beş|altı|yedi|sekiz|dokuz|on|on\s*beş|onbeş|yirmi|otuz)\s*(günlük|gün|haftalık|hafta|aylık|ay)\s*(?:(kesin\s*)?süre|(?:içinde|içerisinde|zarfında|müddetle))/
+      ) ||
+      normClause.match(
+        /(?:tebliğ(?:den)?|öğrenme(?:den)?|karar(?:dan)?)\s*(?:itibaren\s*)?(\d+|bir|iki|üç|dört|beş|yedi|on|on\s*beş|yirmi|otuz)\s*(gün|hafta|ay)\s*(?:içinde|içerisinde)?/
+      )
 
-    // C) PARASAL DEPO / GİDER / BİLİRKİŞİ ÜCRETİ TESPİTİ
-    // Örn: "3.000,00 TL bilirkişi ücreti", "500 TL gider avansı"
-    const amountMatch = clause.match(
-      /(\d{1,3}(?:\.\d{3})*(?:,\d{2})?|\d+)\s*(?:TL|Türk\s*Lirası)/i
-    )
+    // C) PARASAL DEPO / BİLİRKİŞİ / AVANS TESPİTİ
+    const amountMatch = clause.match(/(\d{1,3}(?:\.\d{3})*(?:,\d{2})?|\d+)\s*(?:TL|Türk\s*Lirası)/i)
     let extractedAmount: number | undefined
     if (amountMatch) {
       const rawNum = amountMatch[1].replace(/\./g, '').replace(',', '.')
@@ -255,21 +300,41 @@ export const parseCourtMinute = (
         }
 
         // Başlık Türetme
-        let itemTitle = isDefinite ? 'Kesin Süre: ' : 'Süreli İş: '
-        if (/bilirkişi/i.test(clause)) {
-          itemTitle += extractedAmount ? 'Bilirkişi Ücreti Deposu' : 'Bilirkişi Raporuna İtiraz / Beyan'
-        } else if (/tanık/i.test(clause)) {
-          itemTitle += 'Tanık Listesi / Masrafı Bildirimi'
-        } else if (/delil|belge/i.test(clause)) {
-          itemTitle += 'Delil & Belge Sunma Süresi'
-        } else if (/müzekkere/i.test(clause)) {
-          itemTitle += 'Müzekkere Masrafı / Takibi'
-        } else if (/ıslah/i.test(clause)) {
-          itemTitle += 'Islah Dilekçesi / Harcı'
-        } else if (/ihtiyati\s*tedbir/i.test(clause)) {
-          itemTitle += 'İhtiyati Tedbir Teminatı'
+        let itemTitle = ''
+        if (isObjection) {
+          if (normClause.includes('adli kontrol')) {
+            itemTitle = 'İtiraz Süresi: Adli Kontrol Kararına İtiraz'
+          } else if (normClause.includes('tutukla')) {
+            itemTitle = 'İtiraz Süresi: Tutukluluk Kararına İtiraz'
+          } else if (normClause.includes('istinaf')) {
+            itemTitle = 'İstinaf Başvuru Süresi'
+          } else if (normClause.includes('temyiz')) {
+            itemTitle = 'Temyiz Başvuru Süresi'
+          } else {
+            itemTitle = 'İtiraz / Kanun Yolu Başvuru Süresi'
+          }
+        } else if (normClause.includes('bilirkişi')) {
+          itemTitle = extractedAmount
+            ? 'Bilirkişi Ücreti Deposu'
+            : 'Bilirkişi Raporuna İtiraz / Beyan'
+        } else if (normClause.includes('tanık')) {
+          itemTitle = 'Tanık Listesi / Masrafı Bildirimi'
+        } else if (normClause.includes('delil') || normClause.includes('belge')) {
+          itemTitle = 'Delil & Belge Sunma Süresi'
+        } else if (normClause.includes('müzekkere')) {
+          itemTitle = 'Müzekkere Masrafı / Takibi'
+        } else if (normClause.includes('ıslah')) {
+          itemTitle = 'Islah Dilekçesi / Harcı'
+        } else if (normClause.includes('cevap')) {
+          itemTitle = 'Cevap Dilekçesi Sunma Süresi'
         } else {
-          itemTitle += `${numVal} ${unit.startsWith('hafta') ? 'Haftalık' : 'Günlük'} Ara Karar İfası`
+          itemTitle = `${isDefinite ? 'Kesin Süre' : 'Süreli İş'}: ${numVal} ${
+            unit.startsWith('hafta') ? 'Haftalık' : 'Günlük'
+          } Süre`
+        }
+
+        if (extractedAmount && !itemTitle.includes('Deposu')) {
+          itemTitle += ` (${extractedAmount.toLocaleString('tr-TR')} ₺)`
         }
 
         items.push({
@@ -283,15 +348,15 @@ export const parseCourtMinute = (
           file_no: courtInfo.file_no,
           description: clause.slice(0, 300),
           amount: extractedAmount,
-          is_definite_deadline: isDefinite,
-          priority: isDefinite ? 'high' : extractedAmount ? 'medium' : 'normal',
+          is_definite_deadline: isDefinite || isObjection,
+          priority: isDefinite || isObjection ? 'high' : extractedAmount ? 'medium' : 'normal',
           original_clause: clause
         })
       }
     } else if (extractedAmount && /depo|yatırıl|avans|ücret/i.test(clause)) {
       // Süre net belirtilmemiş ama para depo etme kararı var (varsayılan 2 hafta)
       const target = new Date(baseDate)
-      target.setDate(target.getDate() + 14) // 2 hafta
+      target.setDate(target.getDate() + 14)
       const finalDate = adjustForHmkWeekend(target)
 
       items.push({
@@ -305,7 +370,7 @@ export const parseCourtMinute = (
         file_no: courtInfo.file_no,
         description: clause.slice(0, 300),
         amount: extractedAmount,
-        is_definite_deadline: isDefinite,
+        is_definite_deadline: false,
         priority: 'high',
         original_clause: clause
       })
