@@ -766,6 +766,61 @@ export class Database {
     return { fee: createdFee, installments: createdInstallments }
   }
 
+  public updateFeeWithInstallments(
+    feeId: number,
+    feeData: UpdateFeeInput,
+    installments?: Array<{ installment_no: number; amount: number; due_date: string; notes?: string }>
+  ): { fee: Fee; installments: FeeInstallment[] } {
+    const existingFee = this.getFeeById(feeId)
+    if (!existingFee) {
+      throw new Error('Vekalet ücreti bulunamadı.')
+    }
+
+    const transaction = this.db.transaction(() => {
+      // 1. Update fee
+      this.updateFee(feeId, feeData)
+
+      // 2. Handle installments if array is passed
+      if (Array.isArray(installments)) {
+        // Check if any existing installments have payments
+        const paidCount = (this.db.prepare(`
+          SELECT COUNT(*) as count FROM fee_installments
+          WHERE fee_id = ? AND (status = 'ODENDI' OR paid_amount > 0)
+        `).get(feeId) as { count: number }).count
+
+        if (paidCount > 0) {
+          throw new Error('Ödemesi alınmış taksiti bulunan bir ücretin taksit planı doğrudan değiştirilemez. Lütfen önce ilgili ödemeleri silin.')
+        }
+
+        // Delete previous installments
+        this.db.prepare(`DELETE FROM fee_installments WHERE fee_id = ?`).run(feeId)
+
+        // Insert new installments
+        if (installments.length > 0) {
+          const insertStmt = this.db.prepare(`
+            INSERT INTO fee_installments (fee_id, installment_no, amount, due_date, status, paid_amount, notes)
+            VALUES (?, ?, ?, ?, 'BEKLIYOR', 0, ?)
+          `)
+          for (const item of installments) {
+            insertStmt.run(
+              feeId,
+              item.installment_no,
+              Number(item.amount) || 0,
+              item.due_date,
+              item.notes || null
+            )
+          }
+        }
+      }
+    })
+
+    transaction()
+
+    const updatedFee = this.getFeeById(feeId)!
+    const updatedInstallments = this.getInstallmentsByFeeId(feeId)
+    return { fee: updatedFee, installments: updatedInstallments }
+  }
+
   public payInstallment(
     installmentId: number,
     paymentData: { amount: number; payment_date: string; payment_method: PaymentMethod; notes?: string }

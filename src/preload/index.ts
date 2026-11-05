@@ -44,6 +44,8 @@ export const api = {
     getByClientId: (clientId: number) => ipcRenderer.invoke('feeInstallments:getByClientId', clientId),
     createWithFee: (feeData: unknown, installments: unknown) =>
       ipcRenderer.invoke('feeInstallments:createWithFee', feeData, installments),
+    updateWithFee: (feeId: number, feeData: unknown, installments?: unknown) =>
+      ipcRenderer.invoke('feeInstallments:updateWithFee', feeId, feeData, installments),
     pay: (installmentId: number, paymentData: unknown) =>
       ipcRenderer.invoke('feeInstallments:pay', installmentId, paymentData),
     delete: (id: number) => ipcRenderer.invoke('feeInstallments:delete', id)

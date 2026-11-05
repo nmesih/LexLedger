@@ -207,6 +207,11 @@ export interface WindowApi {
       feeData: Omit<Fee, 'id' | 'created_at' | 'collected_amount' | 'remaining_amount' | 'client_name' | 'case_title'>,
       installments: Array<{ installment_no: number; amount: number; due_date: string; notes?: string }>
     ) => Promise<{ fee: Fee; installments: FeeInstallment[] }>
+    updateWithFee: (
+      feeId: number,
+      feeData: Partial<Fee>,
+      installments?: Array<{ installment_no: number; amount: number; due_date: string; notes?: string }>
+    ) => Promise<{ fee: Fee; installments: FeeInstallment[] }>
     pay: (
       installmentId: number,
       paymentData: { amount: number; payment_date: string; payment_method: string; notes?: string }

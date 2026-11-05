@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   Edit2,
@@ -44,6 +44,7 @@ export const ClientDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const clientId = Number(id)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const [client, setClient] = useState<Client | null>(null)
   const [cases, setCases] = useState<Case[]>([])
@@ -52,9 +53,19 @@ export const ClientDetail: React.FC = () => {
   const [notes, setNotes] = useState<string>('')
   const [notesSavedAt, setNotesSavedAt] = useState<string | null>(null)
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>('davalar')
+  const initialTab = (searchParams.get('tab') as ActiveTab) || 'davalar'
+  const [activeTab, setActiveTab] = useState<ActiveTab>(
+    ['davalar', 'ucretler', 'masraflar', 'notlar'].includes(initialTab) ? initialTab : 'davalar'
+  )
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab') as ActiveTab
+    if (tabParam && ['davalar', 'ucretler', 'masraflar', 'notlar'].includes(tabParam)) {
+      setActiveTab(tabParam)
+    }
+  }, [searchParams])
 
   // Edit Client Modal State
   const [isEditClientModalOpen, setIsEditClientModalOpen] = useState<boolean>(false)
@@ -81,6 +92,7 @@ export const ClientDetail: React.FC = () => {
 
   // Fee Modal State
   const [isFeeModalOpen, setIsFeeModalOpen] = useState<boolean>(false)
+  const [editingFee, setEditingFee] = useState<Fee | null>(null)
   const [feeFormData, setFeeFormData] = useState({
     description: '',
     total_amount: '',
@@ -326,6 +338,7 @@ export const ClientDetail: React.FC = () => {
 
   // FEES ACTIONS
   const handleOpenAddFee = (): void => {
+    setEditingFee(null)
     setFeeFormData({
       description: '',
       total_amount: '',
@@ -335,6 +348,40 @@ export const ClientDetail: React.FC = () => {
       is_installment: false,
       installment_count: 3,
       installments: []
+    })
+    setModalError(null)
+    setIsFeeModalOpen(true)
+  }
+
+  const handleOpenEditFee = async (fee: Fee): Promise<void> => {
+    setEditingFee(fee)
+    let insts = feeInstallmentsList[fee.id]
+    if (!insts) {
+      try {
+        insts = await window.api.feeInstallments.getByFeeId(fee.id)
+      } catch {
+        insts = []
+      }
+    }
+
+    const hasInstallments = Array.isArray(insts) && insts.length > 0
+
+    setFeeFormData({
+      description: fee.description || '',
+      total_amount: String(fee.total_amount ?? ''),
+      case_id: fee.case_id ? String(fee.case_id) : '',
+      date: fee.date || new Date().toISOString().split('T')[0],
+      notes: fee.notes || '',
+      is_installment: hasInstallments,
+      installment_count: hasInstallments ? insts.length : 3,
+      installments: hasInstallments
+        ? insts.map((i) => ({
+            installment_no: i.installment_no,
+            amount: String(i.amount),
+            due_date: i.due_date,
+            notes: i.notes || `${i.installment_no}. Taksit`
+          }))
+        : []
     })
     setModalError(null)
     setIsFeeModalOpen(true)
@@ -384,6 +431,15 @@ export const ClientDetail: React.FC = () => {
       return
     }
 
+    if (editingFee && amountNum < (editingFee.collected_amount || 0)) {
+      setModalError(
+        `Yeni toplam tutar, halihazırda tahsil edilmiş olan tutardan (${formatCurrency(
+          editingFee.collected_amount || 0
+        )}) daha az olamaz.`
+      )
+      return
+    }
+
     if (feeFormData.is_installment) {
       if (!feeFormData.installments || feeFormData.installments.length === 0) {
         setModalError('Taksitli seçildiğinde lütfen en az 2 taksit oluşturun.')
@@ -418,21 +474,48 @@ export const ClientDetail: React.FC = () => {
         notes: feeFormData.notes.trim() || null
       }
 
-      if (feeFormData.is_installment && feeFormData.installments.length > 0) {
-        const instPayload = feeFormData.installments.map((inst) => ({
-          installment_no: inst.installment_no,
-          amount: parseFloat(inst.amount) || 0,
-          due_date: inst.due_date,
-          notes: inst.notes || null
-        }))
-        await window.api.feeInstallments.createWithFee(feePayload, instPayload)
+      if (editingFee) {
+        if (feeFormData.is_installment && feeFormData.installments.length > 0) {
+          const instPayload = feeFormData.installments.map((inst) => ({
+            installment_no: inst.installment_no,
+            amount: parseFloat(inst.amount) || 0,
+            due_date: inst.due_date,
+            notes: inst.notes || null
+          }))
+          await window.api.feeInstallments.updateWithFee(editingFee.id, feePayload, instPayload)
+        } else {
+          await window.api.feeInstallments.updateWithFee(editingFee.id, feePayload, [])
+        }
       } else {
-        await window.api.fees.create(feePayload)
+        if (feeFormData.is_installment && feeFormData.installments.length > 0) {
+          const instPayload = feeFormData.installments.map((inst) => ({
+            installment_no: inst.installment_no,
+            amount: parseFloat(inst.amount) || 0,
+            due_date: inst.due_date,
+            notes: inst.notes || null
+          }))
+          await window.api.feeInstallments.createWithFee(feePayload, instPayload)
+        } else {
+          await window.api.fees.create(feePayload)
+        }
       }
 
       setIsFeeModalOpen(false)
-      const updated = await window.api.fees.getByClientId(clientId)
-      setFees(updated || [])
+      setEditingFee(null)
+
+      const [updatedFees, allClientInstallments] = await Promise.all([
+        window.api.fees.getByClientId(clientId),
+        window.api.feeInstallments.getByClientId(clientId).catch(() => [])
+      ])
+      setFees(updatedFees || [])
+      if (Array.isArray(allClientInstallments)) {
+        const grouped: { [feeId: number]: FeeInstallment[] } = {}
+        for (const item of allClientInstallments) {
+          if (!grouped[item.fee_id]) grouped[item.fee_id] = []
+          grouped[item.fee_id].push(item)
+        }
+        setFeeInstallmentsList(grouped)
+      }
     } catch (err: any) {
       console.error('Save fee error:', err)
       setModalError(err?.message || 'Ücret kaydedilemedi.')
@@ -445,8 +528,19 @@ export const ClientDetail: React.FC = () => {
     if (!confirm('Bu vekalet ücretini, taksitlerini ve ilişkili ödemeleri silmek istediğinize emin misiniz?')) return
     try {
       await window.api.fees.delete(feeId)
-      const updated = await window.api.fees.getByClientId(clientId)
-      setFees(updated || [])
+      const [updatedFees, allClientInstallments] = await Promise.all([
+        window.api.fees.getByClientId(clientId),
+        window.api.feeInstallments.getByClientId(clientId).catch(() => [])
+      ])
+      setFees(updatedFees || [])
+      if (Array.isArray(allClientInstallments)) {
+        const grouped: { [feeId: number]: FeeInstallment[] } = {}
+        for (const item of allClientInstallments) {
+          if (!grouped[item.fee_id]) grouped[item.fee_id] = []
+          grouped[item.fee_id].push(item)
+        }
+        setFeeInstallmentsList(grouped)
+      }
     } catch (err: any) {
       console.error('Delete fee error:', err)
       alert(err?.message || 'Ücret silinemedi.')
@@ -1079,6 +1173,14 @@ export const ClientDetail: React.FC = () => {
                           </button>
 
                           <button
+                            onClick={() => handleOpenEditFee(fee)}
+                            title="Ücreti Düzenle"
+                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+
+                          <button
                             onClick={() => handleDeleteFee(fee.id)}
                             title="Ücreti Sil"
                             className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
@@ -1630,14 +1732,30 @@ export const ClientDetail: React.FC = () => {
         </form>
       </Modal>
 
-      {/* MODAL 3: ADD FEE */}
+      {/* MODAL 3: ADD / EDIT FEE */}
       <Modal
         isOpen={isFeeModalOpen}
-        onClose={() => !submitting && setIsFeeModalOpen(false)}
-        title="Yeni Vekalet Ücreti Tanımla"
+        onClose={() => {
+          if (!submitting) {
+            setIsFeeModalOpen(false)
+            setEditingFee(null)
+          }
+        }}
+        title={editingFee ? 'Vekalet Ücretini Düzenle' : 'Yeni Vekalet Ücreti Tanımla'}
         size="lg"
       >
         <form onSubmit={handleSaveFee} className="space-y-4">
+          {editingFee && (editingFee.collected_amount || 0) > 0 && (
+            <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-lg flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+              <span>
+                Bu vekalet ücreti için halihazırda{' '}
+                <strong>{formatCurrency(editingFee.collected_amount || 0)}</strong> tahsilat yapılmıştır.
+                Toplam ücret bu tutarın altına düşürülemez.
+              </span>
+            </div>
+          )}
+
           {modalError && (
             <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg flex items-center gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
@@ -1930,7 +2048,10 @@ export const ClientDetail: React.FC = () => {
             <button
               type="button"
               disabled={submitting}
-              onClick={() => setIsFeeModalOpen(false)}
+              onClick={() => {
+                setIsFeeModalOpen(false)
+                setEditingFee(null)
+              }}
               className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
             >
               İptal
@@ -1941,7 +2062,13 @@ export const ClientDetail: React.FC = () => {
               className="flex items-center gap-2 px-5 py-2 bg-[#0F1B2D] hover:bg-slate-800 text-white rounded-lg text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
             >
               {submitting && <RefreshCw className="w-4 h-4 animate-spin text-[#C9A84C]" />}
-              <span>{submitting ? 'Kaydediliyor...' : 'Ücreti Kaydet'}</span>
+              <span>
+                {submitting
+                  ? 'Kaydediliyor...'
+                  : editingFee
+                  ? 'Değişiklikleri Kaydet'
+                  : 'Ücreti Kaydet'}
+              </span>
             </button>
           </div>
         </form>

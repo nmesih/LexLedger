@@ -226,7 +226,7 @@ export const Fees: React.FC = () => {
                     return (
                       <tr
                         key={fee.id}
-                        onClick={() => navigate(`/clients/${fee.client_id}`)}
+                        onClick={() => navigate(`/clients/${fee.client_id}?tab=ucretler`)}
                         className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
                       >
                         <td className="py-3.5 px-4 font-semibold text-slate-900 group-hover:text-[#C9A84C] transition-colors">

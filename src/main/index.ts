@@ -163,6 +163,11 @@ function setupIpcHandlers(): void {
     triggerAutoBackup()
     return res
   })
+  ipcMain.handle('feeInstallments:updateWithFee', (_, feeId: number, feeData, installments) => {
+    const res = db.updateFeeWithInstallments(feeId, feeData, installments)
+    triggerAutoBackup()
+    return res
+  })
   ipcMain.handle('feeInstallments:pay', (_, installmentId: number, paymentData) => {
     const res = db.payInstallment(installmentId, paymentData)
     triggerAutoBackup()
