@@ -484,7 +484,15 @@ export const ClientDetail: React.FC = () => {
           }))
           await window.api.feeInstallments.updateWithFee(editingFee.id, feePayload, instPayload)
         } else {
-          await window.api.feeInstallments.updateWithFee(editingFee.id, feePayload, [])
+          try {
+            await window.api.feeInstallments.updateWithFee(editingFee.id, feePayload, [])
+          } catch (updateErr: any) {
+            if (String(updateErr?.message || '').includes('No handler registered')) {
+              await window.api.fees.update(editingFee.id, feePayload)
+            } else {
+              throw updateErr
+            }
+          }
         }
       } else {
         if (feeFormData.is_installment && feeFormData.installments.length > 0) {
@@ -518,7 +526,14 @@ export const ClientDetail: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Save fee error:', err)
-      setModalError(err?.message || 'Ücret kaydedilemedi.')
+      const msg = String(err?.message || '')
+      if (msg.includes('No handler registered')) {
+        setModalError(
+          'Yeni sistem güncellemelerinin devreye girmesi için lütfen LexLedger uygulamasını tamamen kapatıp (Cmd+Q) yeniden başlatın.'
+        )
+      } else {
+        setModalError(err?.message || 'Ücret kaydedilemedi.')
+      }
     } finally {
       setSubmitting(false)
     }
