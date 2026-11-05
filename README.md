@@ -54,6 +54,10 @@ Tüm verileriniz **kendi bilgisayarınızda yerel olarak (SQLite)** saklanır. H
 ### ⚙️ 6. Kişiselleştirilebilir Büro Profili
 * Ayarlar sayfasından büronuzun adını (`Örn: Alan&Alan Hukuk Bürosu`) özelleştirin; tüm menülerde ve resmi raporlarda kendi unvanınız yer alsın.
 
+### 🧠 7. Zabıt & Süre Radarı (HMK Duruşma Analizi)
+* Duruşma zaptı metnini yapıştırarak sonraki duruşma ve kesin süreleri (hafta sonu kaydırmalı HMK hesabı ile) tek tıkla takvime işleme.
+* Tutanak metni diske veya sunucuya kaydedilmez; işlem tamamen bilgisayarın geçici belleğinde gerçekleşir.
+
 ---
 
 ## 📥 İndir ve Kur
