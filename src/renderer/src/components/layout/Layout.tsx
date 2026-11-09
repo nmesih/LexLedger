@@ -1,19 +1,23 @@
 import React from 'react'
 import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
+import CornerReminder from '../calendar/CornerReminder'
 
 export const Layout: React.FC = () => {
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-slate-100 font-sans text-slate-900 select-none">
+    <div className="flex h-screen w-screen overflow-hidden bg-slate-100 font-sans text-slate-900 select-none relative">
       {/* Sidebar */}
       <Sidebar />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-screen min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col h-screen min-w-0 overflow-hidden relative">
         <main className="flex-1 overflow-y-auto bg-slate-50/70 p-6 md:p-8">
           <Outlet />
         </main>
       </div>
+
+      {/* Global Bottom-Right Corner Reminder for Today & Tomorrow */}
+      <CornerReminder />
     </div>
   )
 }
