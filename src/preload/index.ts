@@ -83,6 +83,20 @@ export const api = {
     getPdfFonts: () => ipcRenderer.invoke('reports:getPdfFonts')
   },
 
+  // ─── AUTH & SECURITY ───
+  auth: {
+    isPinSet: () => ipcRenderer.invoke('auth:isPinSet'),
+    isLocked: () => ipcRenderer.invoke('auth:isLocked'),
+    verifyPin: (pin: string) => ipcRenderer.invoke('auth:verifyPin', pin),
+    setPin: (currentPin: string | null, newPin: string) =>
+      ipcRenderer.invoke('auth:setPin', currentPin, newPin),
+    removePin: (currentPin: string) => ipcRenderer.invoke('auth:removePin', currentPin),
+    lock: () => ipcRenderer.invoke('auth:lock'),
+    getSettings: () => ipcRenderer.invoke('auth:getSettings'),
+    updateSettings: (settings: { autoLockMinutes?: number; encryptBackups?: boolean }) =>
+      ipcRenderer.invoke('auth:updateSettings', settings)
+  },
+
   // ─── SETTINGS ───
   settings: {
     get: (key?: string) => ipcRenderer.invoke('settings:get', key),

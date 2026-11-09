@@ -149,6 +149,21 @@ export interface BackupItem {
   date: string
   size?: number | string
   path?: string
+  isEncrypted?: boolean
+  timestamp?: string
+}
+
+export interface AuthSettings {
+  pinEnabled: boolean
+  autoLockMinutes: number
+  encryptBackups: boolean
+}
+
+export interface VerifyPinResult {
+  success: boolean
+  error?: string
+  remainingAttempts?: number
+  lockoutRemainingSeconds?: number
 }
 
 export interface ClientFinancialSummary {
@@ -242,8 +257,18 @@ export interface WindowApi {
     getClientFinancialSummary: (clientId: number) => Promise<ClientFinancialSummary>
     getPdfFonts?: () => Promise<{ regular?: string | null; bold?: string | null }>
   }
+  auth: {
+    isPinSet: () => Promise<boolean>
+    isLocked: () => Promise<boolean>
+    verifyPin: (pin: string) => Promise<VerifyPinResult>
+    setPin: (currentPin: string | null, newPin: string) => Promise<{ success: boolean; error?: string }>
+    removePin: (currentPin: string) => Promise<{ success: boolean; error?: string }>
+    lock: () => Promise<boolean>
+    getSettings: () => Promise<AuthSettings>
+    updateSettings: (settings: Partial<AuthSettings>) => Promise<{ success: boolean }>
+  }
   settings: {
-    get: (key: string) => Promise<any>
+    get: (key?: string) => Promise<any>
     set: (key: string, value: any) => Promise<void>
   }
   backup: {

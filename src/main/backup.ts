@@ -2,6 +2,7 @@ import { join } from 'path'
 import os from 'os'
 import fs from 'fs'
 import { Database } from './database'
+import type { AuthManager } from './auth'
 
 export interface BackupItem {
   filename: string
@@ -9,6 +10,7 @@ export interface BackupItem {
   size: number
   createdAt: string
   timestamp: string
+  isEncrypted?: boolean
 }
 
 export interface BackupResult {
@@ -17,19 +19,26 @@ export interface BackupResult {
   filename?: string
   timestamp?: string
   googleDriveCopied?: boolean
+  isEncrypted?: boolean
   error?: string
 }
 
 export class BackupManager {
   private db: Database
   private userDataPath: string
+  private authManager?: AuthManager
   public readonly backupDir: string
 
-  constructor(db: Database, userDataPath: string) {
+  constructor(db: Database, userDataPath: string, authManager?: AuthManager) {
     this.db = db
     this.userDataPath = userDataPath
+    this.authManager = authManager
     this.backupDir = join(os.homedir(), 'Documents', 'LexLedger', 'backups')
     this.ensureDir(this.backupDir)
+  }
+
+  public setAuthManager(authManager: AuthManager): void {
+    this.authManager = authManager
   }
 
   private ensureDir(dirPath: string): void {
@@ -52,14 +61,34 @@ export class BackupManager {
       const datePart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
       const timePart = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`
       const timestamp = `${datePart}_${timePart}`
-      const backupFileName = `lexledger_backup_${timestamp}.db`
-      const backupFilePath = join(this.backupDir, backupFileName)
+      let backupFileName = `lexledger_backup_${timestamp}.db`
+      let backupFilePath = join(this.backupDir, backupFileName)
 
       // Use better-sqlite3 online backup or fallback to copyFileSync
       try {
         await this.db.getSqlite().backup(backupFilePath)
       } catch {
         fs.copyFileSync(sourceDbPath, backupFilePath)
+      }
+
+      const shouldEncrypt = Boolean(
+        this.authManager?.getSettings().encryptBackups ||
+        this.db.getSetting('app_encrypt_backups') === 'true'
+      )
+
+      let isEncrypted = false
+      if (shouldEncrypt && this.authManager) {
+        const encFilePath = `${backupFilePath}.enc`
+        const encSuccess = await this.authManager.encryptFile(backupFilePath, encFilePath)
+        if (encSuccess) {
+          // Replace unencrypted backup with encrypted one in backups directory
+          try {
+            fs.unlinkSync(backupFilePath)
+          } catch {}
+          backupFilePath = encFilePath
+          backupFileName = `${backupFileName}.enc`
+          isEncrypted = true
+        }
       }
 
       // Check if Google Drive path or secondary backup folder is set in settings or passed
@@ -76,7 +105,8 @@ export class BackupManager {
           const gdriveDest = join(googleDrivePath, backupFileName)
           fs.copyFileSync(backupFilePath, gdriveDest)
           // Also save a latest copy for convenience
-          const latestDest = join(googleDrivePath, 'lexledger_guncel.db')
+          const latestName = isEncrypted ? 'lexledger_guncel.db.enc' : 'lexledger_guncel.db'
+          const latestDest = join(googleDrivePath, latestName)
           fs.copyFileSync(backupFilePath, latestDest)
           googleDriveCopied = true
           this.cleanOldBackups(googleDrivePath, 30)
@@ -93,7 +123,8 @@ export class BackupManager {
         path: backupFilePath,
         filename: backupFileName,
         timestamp: `${datePart} ${timePart.replace(/-/g, ':')}`,
-        googleDriveCopied
+        googleDriveCopied,
+        isEncrypted
       }
     } catch (error) {
       console.error('Perform backup failed:', error)
@@ -112,11 +143,17 @@ export class BackupManager {
 
       const files = fs.readdirSync(this.backupDir)
       const backups = files
-        .filter((file) => file.startsWith('lexledger_backup_') && file.endsWith('.db'))
+        .filter(
+          (file) =>
+            file.startsWith('lexledger_backup_') &&
+            (file.endsWith('.db') || file.endsWith('.db.enc'))
+        )
         .map((file) => {
           const fullPath = join(this.backupDir, file)
           const stat = fs.statSync(fullPath)
-          const match = file.match(/lexledger_backup_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})\.db/)
+          const match = file.match(
+            /lexledger_backup_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})\.db(?:\.enc)?/
+          )
           const timestampStr = match
             ? `${match[1]} ${match[2].replace(/-/g, ':')}`
             : stat.mtime.toISOString().replace('T', ' ').slice(0, 19)
@@ -127,7 +164,8 @@ export class BackupManager {
             size: stat.size,
             date: stat.mtime.toISOString(),
             createdAt: stat.mtime.toISOString(),
-            timestamp: timestampStr
+            timestamp: timestampStr,
+            isEncrypted: file.endsWith('.enc')
           }
         })
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -145,7 +183,11 @@ export class BackupManager {
 
       const files = fs.readdirSync(dirPath)
       const backupFiles = files
-        .filter((file) => file.startsWith('lexledger_backup_') && file.endsWith('.db'))
+        .filter(
+          (file) =>
+            file.startsWith('lexledger_backup_') &&
+            (file.endsWith('.db') || file.endsWith('.db.enc'))
+        )
         .map((file) => {
           const fullPath = join(dirPath, file)
           const stat = fs.statSync(fullPath)

@@ -10,35 +10,49 @@ import {
   BarChart3,
   Calendar,
   Settings,
-  Clock
+  Clock,
+  Lock
 } from 'lucide-react'
 
 export const Sidebar: React.FC = () => {
   const [currentTime, setCurrentTime] = useState<string>('')
   const [currentDate, setCurrentDate] = useState<string>('')
   const [officeName, setOfficeName] = useState<string>('Alan & Alan Hukuk Bürosu')
+  const [isPinEnabled, setIsPinEnabled] = useState<boolean>(false)
 
   useEffect(() => {
-    const loadOfficeName = async () => {
+    const loadData = async () => {
       try {
-        const saved = await window.api.settings.get('office_name')
+        const [saved, pinSet] = await Promise.all([
+          window.api.settings.get('office_name'),
+          window.api.auth.isPinSet()
+        ])
         if (typeof saved === 'string' && saved.trim()) {
           setOfficeName(saved.trim())
         } else if (saved && typeof saved === 'object' && 'office_name' in saved) {
           const val = String((saved as Record<string, any>)['office_name'] || '').trim()
           if (val) setOfficeName(val)
         }
+        setIsPinEnabled(Boolean(pinSet))
       } catch {}
     }
-    loadOfficeName()
+    loadData()
 
     const handleUpdate = (e: any) => {
       if (e.detail && typeof e.detail === 'string' && e.detail.trim()) {
         setOfficeName(e.detail.trim())
       }
     }
+    const handleAuthChange = () => {
+      window.api.auth.isPinSet().then((set) => setIsPinEnabled(Boolean(set))).catch(() => {})
+    }
+
     window.addEventListener('office-name-updated', handleUpdate)
-    return () => window.removeEventListener('office-name-updated', handleUpdate)
+    window.addEventListener('app-auth-changed', handleAuthChange)
+    return () => {
+      window.removeEventListener('office-name-updated', handleUpdate)
+      window.removeEventListener('app-auth-changed', handleAuthChange)
+    }
   }, [])
 
   useEffect(() => {
@@ -144,8 +158,8 @@ export const Sidebar: React.FC = () => {
         </nav>
       </div>
 
-      {/* Footer / Time Info */}
-      <div className="p-4 border-t border-slate-800/80 bg-slate-900/40">
+      {/* Footer / Time Info & Lock */}
+      <div className="p-4 border-t border-slate-800/80 bg-slate-900/40 flex items-center justify-between">
         <div className="flex items-center gap-2.5 text-xs text-slate-400">
           <Clock className="w-4 h-4 text-[#C9A84C]" />
           <div className="flex flex-col">
@@ -153,6 +167,17 @@ export const Sidebar: React.FC = () => {
             <span className="text-[11px] text-slate-400">{currentDate}</span>
           </div>
         </div>
+
+        {isPinEnabled && (
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('app-lock-session'))}
+            className="p-2 text-slate-400 hover:text-[#C9A84C] hover:bg-slate-800 rounded-lg transition-all cursor-pointer group"
+            title="Ekranı Şimdi Kilitle"
+          >
+            <Lock className="w-4 h-4 transition-transform group-hover:scale-110" />
+          </button>
+        )}
       </div>
     </aside>
   )

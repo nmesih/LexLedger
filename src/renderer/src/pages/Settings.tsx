@@ -12,10 +12,17 @@ import {
   AlertCircle,
   FileCheck,
   Edit2,
-  Check
+  Check,
+  Lock,
+  KeyRound,
+  ShieldAlert,
+  Unlock,
+  Eye,
+  EyeOff,
+  X
 } from 'lucide-react'
 import Header from '../components/layout/Header'
-import { BackupItem } from '../types'
+import { BackupItem, AuthSettings } from '../types'
 
 export const Settings: React.FC = () => {
   const [backupPath, setBackupPath] = useState<string>('')
@@ -33,15 +40,38 @@ export const Settings: React.FC = () => {
   const [backupStatusMessage, setBackupStatusMessage] = useState<string | null>(null)
   const [backupStatusType, setBackupStatusType] = useState<'success' | 'error' | null>(null)
 
+  // Auth / PIN State
+  const [authSettings, setAuthSettings] = useState<AuthSettings>({
+    pinEnabled: false,
+    autoLockMinutes: 15,
+    encryptBackups: false
+  })
+  const [pinModalOpen, setPinModalOpen] = useState<boolean>(false)
+  const [pinModalType, setPinModalType] = useState<'set' | 'change' | 'remove'>('set')
+  const [currentPin, setCurrentPin] = useState<string>('')
+  const [newPin, setNewPin] = useState<string>('')
+  const [confirmPin, setConfirmPin] = useState<string>('')
+  const [pinError, setPinError] = useState<string | null>(null)
+  const [pinSuccess, setPinSuccess] = useState<string | null>(null)
+  const [pinSubmitting, setPinSubmitting] = useState<boolean>(false)
+  const [showCurrentPin, setShowCurrentPin] = useState<boolean>(false)
+  const [showNewPin, setShowNewPin] = useState<boolean>(false)
+  const [showConfirmPin, setShowConfirmPin] = useState<boolean>(false)
+
   const loadSettingsAndBackups = useCallback(async () => {
     try {
       setLoading(true)
-      const [driveSetting, localSetting, officeSetting, backupList] = await Promise.all([
+      const [driveSetting, localSetting, officeSetting, backupList, auth] = await Promise.all([
         window.api.settings.get('google_drive_path'),
         window.api.settings.get('local_backup_path'),
         window.api.settings.get('office_name'),
-        window.api.backup.getList()
+        window.api.backup.getList(),
+        window.api.auth.getSettings()
       ])
+
+      if (auth) {
+        setAuthSettings(auth)
+      }
 
       // Drive path extraction with safe type checking
       if (typeof driveSetting === 'string') {
@@ -125,6 +155,115 @@ export const Settings: React.FC = () => {
       setBackupStatusMessage('Klasör seçilirken bir hata oluştu: ' + (err?.message || ''))
       setBackupStatusType('error')
     }
+  }
+
+  const handleOpenPinModal = (type: 'set' | 'change' | 'remove') => {
+    setPinModalType(type)
+    setCurrentPin('')
+    setNewPin('')
+    setConfirmPin('')
+    setPinError(null)
+    setPinSuccess(null)
+    setShowCurrentPin(false)
+    setShowNewPin(false)
+    setShowConfirmPin(false)
+    setPinModalOpen(true)
+  }
+
+  const handlePinSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPinError(null)
+    setPinSuccess(null)
+
+    try {
+      setPinSubmitting(true)
+
+      if (pinModalType === 'set') {
+        if (!newPin || newPin.length < 4 || newPin.length > 12) {
+          setPinError('PIN en az 4, en fazla 12 karakter olmalıdır.')
+          return
+        }
+        if (newPin !== confirmPin) {
+          setPinError('Yeni PIN ile tekrarı uyuşmuyor.')
+          return
+        }
+        const res = await window.api.auth.setPin(null, newPin)
+        if (!res.success) {
+          setPinError(res.error || 'PIN belirlenemedi.')
+          return
+        }
+        setPinSuccess('PIN kilidi başarıyla etkinleştirildi!')
+      } else if (pinModalType === 'change') {
+        if (!currentPin) {
+          setPinError('Mevcut PIN kodunuzu giriniz.')
+          return
+        }
+        if (!newPin || newPin.length < 4 || newPin.length > 12) {
+          setPinError('Yeni PIN en az 4, en fazla 12 karakter olmalıdır.')
+          return
+        }
+        if (newPin !== confirmPin) {
+          setPinError('Yeni PIN ile tekrarı uyuşmuyor.')
+          return
+        }
+        const res = await window.api.auth.setPin(currentPin, newPin)
+        if (!res.success) {
+          setPinError(res.error || 'PIN değiştirilemedi.')
+          return
+        }
+        setPinSuccess('PIN başarıyla güncellendi!')
+      } else if (pinModalType === 'remove') {
+        if (!currentPin) {
+          setPinError('Mevcut PIN kodunuzu giriniz.')
+          return
+        }
+        const res = await window.api.auth.removePin(currentPin)
+        if (!res.success) {
+          setPinError(res.error || 'PIN kaldırılamadı.')
+          return
+        }
+        setPinSuccess('PIN kilidi başarıyla kaldırıldı.')
+      }
+
+      const updated = await window.api.auth.getSettings()
+      if (updated) setAuthSettings(updated)
+      window.dispatchEvent(new CustomEvent('app-auth-changed'))
+
+      setTimeout(() => {
+        setPinModalOpen(false)
+        setPinSuccess(null)
+      }, 1200)
+    } catch (err: any) {
+      console.error('PIN submit error:', err)
+      setPinError(err?.message || 'İşlem sırasında beklenmeyen bir hata oluştu.')
+    } finally {
+      setPinSubmitting(false)
+    }
+  }
+
+  const handleAutoLockChange = async (minutes: number) => {
+    try {
+      await window.api.auth.updateSettings({ autoLockMinutes: minutes })
+      setAuthSettings((prev) => ({ ...prev, autoLockMinutes: minutes }))
+      window.dispatchEvent(new CustomEvent('app-auth-changed'))
+    } catch (err) {
+      console.error('Auto lock update failed:', err)
+    }
+  }
+
+  const handleToggleEncryptBackups = async () => {
+    try {
+      const nextVal = !authSettings.encryptBackups
+      await window.api.auth.updateSettings({ encryptBackups: nextVal })
+      setAuthSettings((prev) => ({ ...prev, encryptBackups: nextVal }))
+      window.dispatchEvent(new CustomEvent('app-auth-changed'))
+    } catch (err) {
+      console.error('Encrypt backups toggle failed:', err)
+    }
+  }
+
+  const handleLockNow = () => {
+    window.dispatchEvent(new CustomEvent('app-lock-session'))
   }
 
   const handlePerformBackup = async (): Promise<void> => {
@@ -324,12 +463,20 @@ export const Settings: React.FC = () => {
                   key={idx}
                   className="px-4 py-3 flex items-center justify-between text-xs hover:bg-slate-50 transition-colors"
                 >
-                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3">
                     <FileCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                     <div>
-                      <p className="font-semibold text-slate-800 font-mono text-[11px]">
-                        {b.filename}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-slate-800 font-mono text-[11px]">
+                          {b.filename}
+                        </p>
+                        {(b.isEncrypted || b.filename.endsWith('.enc')) && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                            <Lock className="w-2.5 h-2.5 text-amber-600" />
+                            AES-256 Şifreli
+                          </span>
+                        )}
+                      </div>
                       {b.path && <p className="text-[10px] text-slate-400 truncate max-w-md">{b.path}</p>}
                     </div>
                   </div>
@@ -344,6 +491,131 @@ export const Settings: React.FC = () => {
               ))}
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Section: Güvenlik & PIN Kilidi */}
+      <div className="bg-white rounded-xl border border-slate-200/90 p-6 shadow-sm space-y-6">
+        <div className="flex items-start justify-between pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-amber-50 text-amber-700 rounded-xl">
+              <Lock className="w-6 h-6 text-[#C9A84C]" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2.5">
+                <h3 className="text-base font-bold text-slate-900">Güvenlik &amp; PIN Kilidi</h3>
+                {authSettings.pinEnabled ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    Kilit Aktif
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                    <AlertCircle className="w-3 h-3 text-slate-500" />
+                    Kilit Devre Dışı
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Avukatlık Kanunu m.36 ve KVKK m.12 gereğince müvekkil ve mali sırlarınızı yetkisiz erişimlere karşı koruyun
+              </p>
+            </div>
+          </div>
+
+          {authSettings.pinEnabled ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleLockNow}
+                className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                title="Ekranı Şimdi Kilitle"
+              >
+                <Lock className="w-3.5 h-3.5 text-slate-600" />
+                <span>Şimdi Kilitle</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOpenPinModal('change')}
+                className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+              >
+                PIN Değiştir
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOpenPinModal('remove')}
+                className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-semibold transition-colors border border-rose-200 cursor-pointer"
+              >
+                Kilidi Kaldır
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => handleOpenPinModal('set')}
+              className="flex items-center gap-2 px-4 py-2 bg-[#0F1B2D] hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition-colors shadow-sm cursor-pointer"
+            >
+              <KeyRound className="w-4 h-4 text-[#C9A84C]" />
+              <span>PIN Kilidi Oluştur</span>
+            </button>
+          )}
+        </div>
+
+        {/* Security Controls */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Auto lock timer */}
+          <div className="p-4 bg-slate-50/70 border border-slate-100 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-[#C9A84C]" />
+                Otomatik Kilitlenme Süresi
+              </label>
+              <span className="text-[11px] text-slate-400">
+                {authSettings.autoLockMinutes === 0 ? 'Kapalı' : `${authSettings.autoLockMinutes} dk hareketsizlik`}
+              </span>
+            </div>
+            <select
+              value={authSettings.autoLockMinutes}
+              disabled={!authSettings.pinEnabled}
+              onChange={(e) => handleAutoLockChange(parseInt(e.target.value, 10))}
+              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#C9A84C]/50 focus:border-[#C9A84C] disabled:bg-slate-100 disabled:text-slate-400 cursor-pointer"
+            >
+              <option value={5}>5 Dakika (Yüksek Güvenlik)</option>
+              <option value={15}>15 Dakika (Önerilen)</option>
+              <option value={30}>30 Dakika</option>
+              <option value={60}>1 Saat</option>
+              <option value={0}>Asla (Yalnızca elle kilitle)</option>
+            </select>
+            <p className="text-[11px] text-slate-400 mt-2">
+              Bilgisayar başında olmadığınızda süre dolunca ekran otomatik olarak PIN ile kilitlenir.
+            </p>
+          </div>
+
+          {/* Backup encryption toggle */}
+          <div className="p-4 bg-slate-50/70 border border-slate-100 rounded-lg flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#C9A84C]" />
+                  Yedekleri AES-256 ile Şifrele
+                </span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={authSettings.encryptBackups}
+                    onChange={handleToggleEncryptBackups}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0F1B2D]"></div>
+                </label>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Google Drive veya yerel klasörünüze aktarılan yedek kopyalarını AES-256-GCM kriptografisiyle (.enc) şifreler.
+              </p>
+            </div>
+            <div className="mt-2 text-[10px] text-slate-400 font-mono">
+              Durum: {authSettings.encryptBackups ? 'AES-256 Kriptolu Aktif' : 'Standart SQLite Kopyası'}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -466,6 +738,158 @@ export const Settings: React.FC = () => {
           veritabanında saklanır ve üçüncü şahıslarla paylaşılmaz.
         </div>
       </div>
+
+      {/* PIN Configuration Modal */}
+      {pinModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="px-6 py-4 bg-[#0F1B2D] text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <KeyRound className="w-5 h-5 text-[#C9A84C]" />
+                <h3 className="font-bold text-sm tracking-tight">
+                  {pinModalType === 'set' && 'Güvenlik PIN Kilidi Belirle'}
+                  {pinModalType === 'change' && 'PIN Kodunu Değiştir'}
+                  {pinModalType === 'remove' && 'PIN Kilidini Kaldır'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPinModalOpen(false)}
+                className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handlePinSubmit} className="p-6 space-y-4">
+              {pinError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{pinError}</span>
+                </div>
+              )}
+
+              {pinSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  <span>{pinSuccess}</span>
+                </div>
+              )}
+
+              {/* Current PIN (for change or remove) */}
+              {(pinModalType === 'change' || pinModalType === 'remove') && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Mevcut PIN Kodunuz
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showCurrentPin ? 'text' : 'password'}
+                      value={currentPin}
+                      onChange={(e) => setCurrentPin(e.target.value)}
+                      placeholder="Mevcut PIN..."
+                      maxLength={12}
+                      autoFocus
+                      required
+                      className="w-full px-3 py-2 pr-10 text-sm bg-slate-50 border border-slate-200 rounded-lg font-mono tracking-widest text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#C9A84C]/50 focus:border-[#C9A84C]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPin(!showCurrentPin)}
+                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+                    >
+                      {showCurrentPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* New PIN & Confirm (for set or change) */}
+              {(pinModalType === 'set' || pinModalType === 'change') && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {pinModalType === 'set' ? 'Yeni PIN (4-12 Karakter)' : 'Yeni PIN Kodu'}
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showNewPin ? 'text' : 'password'}
+                        value={newPin}
+                        onChange={(e) => setNewPin(e.target.value)}
+                        placeholder="Örn: 123456"
+                        maxLength={12}
+                        autoFocus={pinModalType === 'set'}
+                        required
+                        className="w-full px-3 py-2 pr-10 text-sm bg-slate-50 border border-slate-200 rounded-lg font-mono tracking-widest text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#C9A84C]/50 focus:border-[#C9A84C]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPin(!showNewPin)}
+                        className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+                      >
+                        {showNewPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Yeni PIN Tekrarı
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showConfirmPin ? 'text' : 'password'}
+                        value={confirmPin}
+                        onChange={(e) => setConfirmPin(e.target.value)}
+                        placeholder="Yeni PIN tekrar..."
+                        maxLength={12}
+                        required
+                        className="w-full px-3 py-2 pr-10 text-sm bg-slate-50 border border-slate-200 rounded-lg font-mono tracking-widest text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#C9A84C]/50 focus:border-[#C9A84C]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPin(!showConfirmPin)}
+                        className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+                      >
+                        {showConfirmPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <div className="pt-2 flex items-center justify-end gap-2.5 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setPinModalOpen(false)}
+                  disabled={pinSubmitting}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 transition-colors cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={pinSubmitting}
+                  className={`px-5 py-2 text-xs font-bold rounded-lg text-white transition-colors flex items-center gap-2 cursor-pointer shadow-sm ${
+                    pinModalType === 'remove'
+                      ? 'bg-rose-600 hover:bg-rose-700'
+                      : 'bg-[#0F1B2D] hover:bg-slate-800'
+                  }`}
+                >
+                  {pinSubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#C9A84C]" />}
+                  <span>
+                    {pinModalType === 'set' && 'PIN Kilidini Etkinleştir'}
+                    {pinModalType === 'change' && 'PIN Kodunu Güncelle'}
+                    {pinModalType === 'remove' && 'Kilidi Kaldır'}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

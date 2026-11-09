@@ -3,11 +3,19 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { Database } from './database'
 import { BackupManager } from './backup'
+import { AuthManager } from './auth'
 import fs from 'fs'
 
 let mainWindow: BrowserWindow | null = null
 let db: Database
 let backupManager: BackupManager
+let authManager: AuthManager
+
+function ensureUnlocked(): void {
+  if (authManager && authManager.isLocked()) {
+    throw new Error('OTURUM_KILITLI: Uygulama kilitli. Lütfen PIN giriniz.')
+  }
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -69,11 +77,12 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // Initialize database
+  // Initialize database & auth manager
   const userDataPath = app.getPath('userData')
   const dbPath = join(userDataPath, 'lexledger.db')
   db = new Database(dbPath)
-  backupManager = new BackupManager(db, userDataPath)
+  authManager = new AuthManager(db)
+  backupManager = new BackupManager(db, userDataPath, authManager)
 
   // Perform startup backup
   backupManager.performBackup()
@@ -101,144 +110,234 @@ function triggerAutoBackup(): void {
 }
 
 function setupIpcHandlers(): void {
+  // ─── AUTH & SECURITY ───
+  ipcMain.handle('auth:isPinSet', () => authManager.isPinSet())
+  ipcMain.handle('auth:isLocked', () => authManager.isLocked())
+  ipcMain.handle('auth:verifyPin', (_, pin: string) => authManager.verifyPin(pin))
+  ipcMain.handle('auth:setPin', (_, currentPin: string | null, newPin: string) =>
+    authManager.setPin(currentPin, newPin)
+  )
+  ipcMain.handle('auth:removePin', (_, currentPin: string) => authManager.removePin(currentPin))
+  ipcMain.handle('auth:lock', () => {
+    authManager.lock()
+    return true
+  })
+  ipcMain.handle('auth:getSettings', () => authManager.getSettings())
+  ipcMain.handle('auth:updateSettings', (_, settings) => authManager.updateSettings(settings))
+
   // ─── CLIENTS ───
-  ipcMain.handle('clients:getAll', () => db.getAllClients())
-  ipcMain.handle('clients:getById', (_, id: number) => db.getClientById(id))
+  ipcMain.handle('clients:getAll', () => {
+    ensureUnlocked()
+    return db.getAllClients()
+  })
+  ipcMain.handle('clients:getById', (_, id: number) => {
+    ensureUnlocked()
+    return db.getClientById(id)
+  })
   ipcMain.handle('clients:create', (_, data) => {
+    ensureUnlocked()
     const res = db.createClient(data)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('clients:update', (_, id: number, data) => {
+    ensureUnlocked()
     const res = db.updateClient(id, data)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('clients:delete', (_, id: number) => {
+    ensureUnlocked()
     const res = db.deleteClient(id)
     triggerAutoBackup()
     return res
   })
-  ipcMain.handle('clients:search', (_, query: string) => db.searchClients(query))
+  ipcMain.handle('clients:search', (_, query: string) => {
+    ensureUnlocked()
+    return db.searchClients(query)
+  })
 
   // ─── CASES ───
-  ipcMain.handle('cases:getAll', () => db.getAllCases())
-  ipcMain.handle('cases:getByClientId', (_, clientId: number) => db.getCasesByClientId(clientId))
-  ipcMain.handle('cases:getById', (_, id: number) => db.getCaseById(id))
+  ipcMain.handle('cases:getAll', () => {
+    ensureUnlocked()
+    return db.getAllCases()
+  })
+  ipcMain.handle('cases:getByClientId', (_, clientId: number) => {
+    ensureUnlocked()
+    return db.getCasesByClientId(clientId)
+  })
+  ipcMain.handle('cases:getById', (_, id: number) => {
+    ensureUnlocked()
+    return db.getCaseById(id)
+  })
   ipcMain.handle('cases:create', (_, data) => {
+    ensureUnlocked()
     const res = db.createCase(data)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('cases:update', (_, id: number, data) => {
+    ensureUnlocked()
     const res = db.updateCase(id, data)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('cases:delete', (_, id: number) => {
+    ensureUnlocked()
     const res = db.deleteCase(id)
     triggerAutoBackup()
     return res
   })
 
   // ─── FEES ───
-  ipcMain.handle('fees:getAll', () => db.getAllFees())
-  ipcMain.handle('fees:getByClientId', (_, clientId: number) => db.getFeesByClientId(clientId))
+  ipcMain.handle('fees:getAll', () => {
+    ensureUnlocked()
+    return db.getAllFees()
+  })
+  ipcMain.handle('fees:getByClientId', (_, clientId: number) => {
+    ensureUnlocked()
+    return db.getFeesByClientId(clientId)
+  })
   ipcMain.handle('fees:create', (_, data) => {
+    ensureUnlocked()
     const res = db.createFee(data)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('fees:update', (_, id: number, data) => {
+    ensureUnlocked()
     const res = db.updateFee(id, data)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('fees:delete', (_, id: number) => {
+    ensureUnlocked()
     const res = db.deleteFee(id)
     triggerAutoBackup()
     return res
   })
 
   // ─── FEE PAYMENTS ───
-  ipcMain.handle('feePayments:getByFeeId', (_, feeId: number) => db.getFeePaymentsByFeeId(feeId))
+  ipcMain.handle('feePayments:getByFeeId', (_, feeId: number) => {
+    ensureUnlocked()
+    return db.getFeePaymentsByFeeId(feeId)
+  })
   ipcMain.handle('feePayments:create', (_, data) => {
+    ensureUnlocked()
     const res = db.createFeePayment(data)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('feePayments:delete', (_, id: number) => {
+    ensureUnlocked()
     const res = db.deleteFeePayment(id)
     triggerAutoBackup()
     return res
   })
 
   // ─── FEE INSTALLMENTS ───
-  ipcMain.handle('feeInstallments:getByFeeId', (_, feeId: number) => db.getInstallmentsByFeeId(feeId))
-  ipcMain.handle('feeInstallments:getByClientId', (_, clientId: number) => db.getInstallmentsByClientId(clientId))
+  ipcMain.handle('feeInstallments:getByFeeId', (_, feeId: number) => {
+    ensureUnlocked()
+    return db.getInstallmentsByFeeId(feeId)
+  })
+  ipcMain.handle('feeInstallments:getByClientId', (_, clientId: number) => {
+    ensureUnlocked()
+    return db.getInstallmentsByClientId(clientId)
+  })
   ipcMain.handle('feeInstallments:createWithFee', (_, feeData, installments) => {
+    ensureUnlocked()
     const res = db.createFeeWithInstallments(feeData, installments)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('feeInstallments:updateWithFee', (_, feeId: number, feeData, installments) => {
+    ensureUnlocked()
     const res = db.updateFeeWithInstallments(feeId, feeData, installments)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('feeInstallments:pay', (_, installmentId: number, paymentData) => {
+    ensureUnlocked()
     const res = db.payInstallment(installmentId, paymentData)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('feeInstallments:delete', (_, id: number) => {
+    ensureUnlocked()
     const res = db.deleteInstallment(id)
     triggerAutoBackup()
     return res
   })
 
   // ─── CLIENT EXPENSES ───
-  ipcMain.handle('clientExpenses:getByClientId', (_, clientId: number) => db.getClientExpensesByClientId(clientId))
+  ipcMain.handle('clientExpenses:getByClientId', (_, clientId: number) => {
+    ensureUnlocked()
+    return db.getClientExpensesByClientId(clientId)
+  })
   ipcMain.handle('clientExpenses:create', (_, data) => {
+    ensureUnlocked()
     const res = db.createClientExpense(data)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('clientExpenses:update', (_, id: number, data) => {
+    ensureUnlocked()
     const res = db.updateClientExpense(id, data)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('clientExpenses:delete', (_, id: number) => {
+    ensureUnlocked()
     const res = db.deleteClientExpense(id)
     triggerAutoBackup()
     return res
   })
 
   // ─── OFFICE EXPENSES ───
-  ipcMain.handle('officeExpenses:getAll', () => db.getAllOfficeExpenses())
-  ipcMain.handle('officeExpenses:getByMonth', (_, year: number, month: number) => db.getOfficeExpensesByMonth(year, month))
+  ipcMain.handle('officeExpenses:getAll', () => {
+    ensureUnlocked()
+    return db.getAllOfficeExpenses()
+  })
+  ipcMain.handle('officeExpenses:getByMonth', (_, year: number, month: number) => {
+    ensureUnlocked()
+    return db.getOfficeExpensesByMonth(year, month)
+  })
   ipcMain.handle('officeExpenses:create', (_, data) => {
+    ensureUnlocked()
     const res = db.createOfficeExpense(data)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('officeExpenses:update', (_, id: number, data) => {
+    ensureUnlocked()
     const res = db.updateOfficeExpense(id, data)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('officeExpenses:delete', (_, id: number) => {
+    ensureUnlocked()
     const res = db.deleteOfficeExpense(id)
     triggerAutoBackup()
     return res
   })
 
   // ─── DASHBOARD ───
-  ipcMain.handle('dashboard:getMonthlyStats', (_, year: number, month: number) => db.getMonthlyStats(year, month))
-  ipcMain.handle('dashboard:getLast6MonthsStats', () => db.getLast6MonthsStats())
-  ipcMain.handle('dashboard:getTotalReceivables', () => db.getTotalReceivables())
-  ipcMain.handle('dashboard:getRecentActivity', () => db.getRecentActivity())
+  ipcMain.handle('dashboard:getMonthlyStats', (_, year: number, month: number) => {
+    ensureUnlocked()
+    return db.getMonthlyStats(year, month)
+  })
+  ipcMain.handle('dashboard:getLast6MonthsStats', () => {
+    ensureUnlocked()
+    return db.getLast6MonthsStats()
+  })
+  ipcMain.handle('dashboard:getTotalReceivables', () => {
+    ensureUnlocked()
+    return db.getTotalReceivables()
+  })
+  ipcMain.handle('dashboard:getRecentActivity', () => {
+    ensureUnlocked()
+    return db.getRecentActivity()
+  })
 
 function getPdfFontBase64(filename: string): string | null {
   const candidatePaths = [
@@ -259,20 +358,39 @@ function getPdfFontBase64(filename: string): string | null {
 }
 
   // ─── REPORTS ───
-  ipcMain.handle('reports:getYearlyStats', (_, year: number) => db.getYearlyStats(year))
-  ipcMain.handle('reports:getClientFinancialSummary', (_, clientId: number) => db.getClientFinancialSummary(clientId))
+  ipcMain.handle('reports:getYearlyStats', (_, year: number) => {
+    ensureUnlocked()
+    return db.getYearlyStats(year)
+  })
+  ipcMain.handle('reports:getClientFinancialSummary', (_, clientId: number) => {
+    ensureUnlocked()
+    return db.getClientFinancialSummary(clientId)
+  })
   ipcMain.handle('reports:getPdfFonts', () => ({
     regular: getPdfFontBase64('Arial-Regular.ttf'),
     bold: getPdfFontBase64('Arial-Bold.ttf')
   }))
 
   // ─── SETTINGS ───
-  ipcMain.handle('settings:get', (_, key?: string) => (key ? db.getSetting(key) : db.getSettings()))
-  ipcMain.handle('settings:set', (_, key: string, value: string) => db.setSetting(key, value))
+  ipcMain.handle('settings:get', (_, key?: string) => {
+    if (key === 'office_name') {
+      return db.getSetting('office_name')
+    }
+    ensureUnlocked()
+    return key ? db.getSetting(key) : db.getSettings()
+  })
+  ipcMain.handle('settings:set', (_, key: string, value: string) => {
+    ensureUnlocked()
+    return db.setSetting(key, value)
+  })
 
   // ─── BACKUP ───
-  ipcMain.handle('backup:perform', (_, customDir?: string) => backupManager.performBackup(customDir))
+  ipcMain.handle('backup:perform', (_, customDir?: string) => {
+    ensureUnlocked()
+    return backupManager.performBackup(customDir)
+  })
   ipcMain.handle('backup:selectDirectory', async () => {
+    ensureUnlocked()
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ['openDirectory'],
       title: 'Yedekleme Klasörü Seç'
@@ -282,35 +400,52 @@ function getPdfFontBase64(filename: string): string | null {
     }
     return null
   })
-  ipcMain.handle('backup:getList', () => backupManager.getBackupList())
+  ipcMain.handle('backup:getList', () => {
+    ensureUnlocked()
+    return backupManager.getBackupList()
+  })
 
   // ─── NOTES ───
-  ipcMain.handle('notes:getByClientId', (_, clientId: number) => db.getNotesByClientId(clientId))
+  ipcMain.handle('notes:getByClientId', (_, clientId: number) => {
+    ensureUnlocked()
+    return db.getNotesByClientId(clientId)
+  })
   ipcMain.handle('notes:save', (_, clientId: number, content: string) => {
+    ensureUnlocked()
     const res = db.saveNote(clientId, content)
     triggerAutoBackup()
     return res
   })
 
   // ─── CALENDAR EVENTS ───
-  ipcMain.handle('calendar:getAll', () => db.getAllCalendarEvents())
-  ipcMain.handle('calendar:getByRange', (_, start: string, end: string) => db.getCalendarEventsByDateRange(start, end))
+  ipcMain.handle('calendar:getAll', () => {
+    ensureUnlocked()
+    return db.getAllCalendarEvents()
+  })
+  ipcMain.handle('calendar:getByRange', (_, start: string, end: string) => {
+    ensureUnlocked()
+    return db.getCalendarEventsByDateRange(start, end)
+  })
   ipcMain.handle('calendar:create', (_, data) => {
+    ensureUnlocked()
     const res = db.createCalendarEvent(data)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('calendar:update', (_, id: number, data) => {
+    ensureUnlocked()
     const res = db.updateCalendarEvent(id, data)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('calendar:delete', (_, id: number) => {
+    ensureUnlocked()
     const res = db.deleteCalendarEvent(id)
     triggerAutoBackup()
     return res
   })
   ipcMain.handle('calendar:deduplicate', () => {
+    ensureUnlocked()
     const res = db.deduplicateCalendarEvents()
     if (res > 0) triggerAutoBackup()
     return res
@@ -350,6 +485,7 @@ function decodeBufferToText(buf: Buffer): string {
 }
 
   ipcMain.handle('calendar:selectAndImportIcs', async () => {
+    ensureUnlocked()
     try {
       const win = mainWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
       const result = await dialog.showOpenDialog(win, {
@@ -377,6 +513,7 @@ function decodeBufferToText(buf: Buffer): string {
     }
   })
   ipcMain.handle('calendar:importIcsContent', (_, content: string) => {
+    ensureUnlocked()
     try {
       const res = db.importIcsContent(content)
       triggerAutoBackup()
