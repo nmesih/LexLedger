@@ -22,7 +22,7 @@ function createWindow(): void {
     icon: join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
     }
@@ -33,8 +33,26 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    try {
+      const parsed = new URL(details.url)
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        shell.openExternal(details.url)
+      }
+    } catch {}
     return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    const currentUrl = mainWindow?.webContents.getURL()
+    if (navigationUrl !== currentUrl) {
+      event.preventDefault()
+      try {
+        const parsed = new URL(navigationUrl)
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+          shell.openExternal(navigationUrl)
+        }
+      } catch {}
+    }
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {

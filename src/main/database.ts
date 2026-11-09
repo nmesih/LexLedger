@@ -476,12 +476,15 @@ export class Database {
   }
 
   public updateClient(id: number, data: UpdateClientInput): Client | null {
-    const keys = Object.keys(data).filter((k) => (data as Record<string, unknown>)[k] !== undefined)
+    const ALLOWED_COLUMNS = new Set(['name', 'tc_no', 'phone', 'email', 'address', 'notes'])
+    const keys = Object.keys(data).filter(
+      (k) => ALLOWED_COLUMNS.has(k) && (data as Record<string, unknown>)[k] !== undefined
+    )
     if (keys.length === 0) {
       return this.getClientById(id)
     }
 
-    const setClause = keys.map((k) => `${k} = ?`).join(', ')
+    const setClause = keys.map((k) => `"${k}" = ?`).join(', ')
     const values = keys.map((k) => (data as Record<string, unknown>)[k])
 
     this.db.prepare(`UPDATE clients SET ${setClause} WHERE id = ?`).run(...values, id)
@@ -556,12 +559,25 @@ export class Database {
   }
 
   public updateCase(id: number, data: UpdateCaseInput): Case | null {
-    const keys = Object.keys(data).filter((k) => (data as Record<string, unknown>)[k] !== undefined)
+    const ALLOWED_COLUMNS = new Set([
+      'client_id',
+      'type',
+      'title',
+      'court',
+      'file_no',
+      'status',
+      'description',
+      'opened_at',
+      'closed_at'
+    ])
+    const keys = Object.keys(data).filter(
+      (k) => ALLOWED_COLUMNS.has(k) && (data as Record<string, unknown>)[k] !== undefined
+    )
     if (keys.length === 0) {
       return this.getCaseById(id)
     }
 
-    const setClause = keys.map((k) => `${k} = ?`).join(', ')
+    const setClause = keys.map((k) => `"${k}" = ?`).join(', ')
     const values = keys.map((k) => (data as Record<string, unknown>)[k])
 
     this.db.prepare(`UPDATE cases SET ${setClause} WHERE id = ?`).run(...values, id)
@@ -637,12 +653,23 @@ export class Database {
   }
 
   public updateFee(id: number, data: UpdateFeeInput): Fee | null {
-    const keys = Object.keys(data).filter((k) => (data as Record<string, unknown>)[k] !== undefined)
+    const ALLOWED_COLUMNS = new Set([
+      'client_id',
+      'case_id',
+      'description',
+      'total_amount',
+      'collected_amount',
+      'date',
+      'notes'
+    ])
+    const keys = Object.keys(data).filter(
+      (k) => ALLOWED_COLUMNS.has(k) && (data as Record<string, unknown>)[k] !== undefined
+    )
     if (keys.length === 0) {
       return this.getFeeById(id)
     }
 
-    const setClause = keys.map((k) => `${k} = ?`).join(', ')
+    const setClause = keys.map((k) => `"${k}" = ?`).join(', ')
     const values = keys.map((k) => (data as Record<string, unknown>)[k])
 
     this.db.prepare(`UPDATE fees SET ${setClause} WHERE id = ?`).run(...values, id)
@@ -922,9 +949,19 @@ export class Database {
   }
 
   public updateClientExpense(id: number, data: UpdateClientExpenseInput): ClientExpense | null {
+    const ALLOWED_COLUMNS = new Set([
+      'client_id',
+      'case_id',
+      'description',
+      'amount',
+      'paid_by',
+      'reimbursed',
+      'reimbursed_amount',
+      'date'
+    ])
     const sanitizedData: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(data)) {
-      if (value === undefined) continue
+      if (value === undefined || !ALLOWED_COLUMNS.has(key)) continue
       if (key === 'reimbursed') {
         sanitizedData[key] = value === true || value === 1 ? 1 : 0
       } else if (key === 'case_id') {
@@ -941,7 +978,7 @@ export class Database {
       return this.getClientExpenseById(id)
     }
 
-    const setClause = keys.map((k) => `${k} = ?`).join(', ')
+    const setClause = keys.map((k) => `"${k}" = ?`).join(', ')
     const values = keys.map((k) => sanitizedData[k])
 
     this.db.prepare(`UPDATE client_expenses SET ${setClause} WHERE id = ?`).run(...values, id)
@@ -1008,6 +1045,14 @@ export class Database {
   }
 
   public updateOfficeExpense(id: number, data: UpdateOfficeExpenseInput): OfficeExpense | null {
+    const ALLOWED_COLUMNS = new Set([
+      'category',
+      'description',
+      'amount',
+      'date',
+      'month',
+      'year'
+    ])
     const modifiedData = { ...data }
     if (modifiedData.date && (modifiedData.month === undefined || modifiedData.year === undefined)) {
       const parts = modifiedData.date.split('-')
@@ -1017,12 +1062,14 @@ export class Database {
       }
     }
 
-    const keys = Object.keys(modifiedData).filter((k) => (modifiedData as Record<string, unknown>)[k] !== undefined)
+    const keys = Object.keys(modifiedData).filter(
+      (k) => ALLOWED_COLUMNS.has(k) && (modifiedData as Record<string, unknown>)[k] !== undefined
+    )
     if (keys.length === 0) {
       return this.getOfficeExpenseById(id)
     }
 
-    const setClause = keys.map((k) => `${k} = ?`).join(', ')
+    const setClause = keys.map((k) => `"${k}" = ?`).join(', ')
     const values = keys.map((k) => (modifiedData as Record<string, unknown>)[k])
 
     this.db.prepare(`UPDATE office_expenses SET ${setClause} WHERE id = ?`).run(...values, id)
@@ -1361,9 +1408,26 @@ export class Database {
   }
 
   public updateCalendarEvent(id: number, data: UpdateCalendarEventInput): CalendarEvent | null {
+    const ALLOWED_COLUMNS = new Set([
+      'case_id',
+      'client_id',
+      'title',
+      'event_type',
+      'start_date',
+      'start_time',
+      'end_date',
+      'end_time',
+      'location',
+      'description',
+      'court',
+      'file_no',
+      'status',
+      'is_ics_import',
+      'ics_uid'
+    ])
     const sanitizedData: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(data)) {
-      if (value === undefined) continue
+      if (value === undefined || !ALLOWED_COLUMNS.has(key)) continue
       if (key === 'client_id' || key === 'case_id') {
         sanitizedData[key] = value ? Number(value) : null
       } else {
@@ -1376,7 +1440,7 @@ export class Database {
       return this.db.prepare(`SELECT * FROM calendar_events WHERE id = ?`).get(id) as CalendarEvent
     }
 
-    const setClause = keys.map((k) => `${k} = ?`).join(', ')
+    const setClause = keys.map((k) => `"${k}" = ?`).join(', ')
     const values = keys.map((k) => sanitizedData[k])
 
     this.db.prepare(`UPDATE calendar_events SET ${setClause} WHERE id = ?`).run(...values, id)
